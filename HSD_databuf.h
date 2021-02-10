@@ -6,6 +6,7 @@
 #define PKTDATASIZE         512     //byte of data block
 #define BIT8PKTDATASIZE     256     //byte of 8bit data block
 #define HEADERSIZE          16      //byte of header
+#define SCIDATASIZE         256
 
 //Defining the characteristics of the circuluar buffers
 #define CACHE_ALIGNMENT         256
@@ -39,7 +40,7 @@ typedef uint8_t HSD_input_header_cache_alignment[
 typedef struct HSD_input_block {
     HSD_input_block_header_t header;
     HSD_input_header_cache_alignment padding;       // Maintain cache alignment
-    char data_block[INPUTBLOCKSIZE*sizeof(char)];   //define input buffer
+    unsigned char data_block[INPUTBLOCKSIZE*sizeof(char)];   //define input buffer
 } HSD_input_block_t;
 
 typedef struct HSD_input_databuf {
@@ -81,7 +82,7 @@ typedef uint8_t HSD_output_header_cache_alignment[
 typedef struct HSD_output_block {
     HSD_output_block_header_t header;
     HSD_output_header_cache_alignment padding;  //Maintain cache alignment
-    char stream_block[OUTPUTBLOCKSIZE*sizeof(char)];
+    unsigned char stream_block[OUTPUTBLOCKSIZE*sizeof(char)];
     char coinc_block[OUTPUTBLOCKSIZE*sizeof(char)];
 } HSD_output_block_t;
 

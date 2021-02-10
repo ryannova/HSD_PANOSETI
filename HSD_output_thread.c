@@ -39,7 +39,6 @@
 #define RANK 2
 #define QUABOPERMODULE 4
 #define PKTPERPAIR QUABOPERMODULE*2
-#define SCIDATASIZE 256
 #define HKDATASIZE 464
 #define DATABLOCKSIZE SCIDATASIZE*PKTPERPAIR+64+16
 #define HKFIELDS 27
@@ -1373,18 +1372,20 @@ void writeDataBlock(hid_t frame, modulePairData_t* module, int index, int mode){
 /**
  * Store the data from the data_ptr to the moduleData based on the mode.
  */
-void storePktData(uint8_t* moduleData, char* data_ptr, int mode, int quaboIndex){
+void storePktData(uint8_t* moduleData, unsigned char* data_ptr, int mode, int quaboIndex){
     uint8_t *data;
     if (mode == 16){
         data = moduleData + (quaboIndex*SCIDATASIZE*2);
-        for(int i = 0; i < SCIDATASIZE*2; i++){
+        memcpy(data, data_ptr, sizeof(unsigned char)*SCIDATASIZE*2);
+        /*for(int i = 0; i < SCIDATASIZE*2; i++){
             data[i] = data_ptr[i];
-        }
+        }*/
     } else if(mode == 8){
         data = moduleData + (quaboIndex*SCIDATASIZE);
-        for(int i = 0; i < SCIDATASIZE; i++){
+        memcpy(data, data_ptr, sizeof(unsigned char)*SCIDATASIZE);
+        /*for(int i = 0; i < SCIDATASIZE; i++){
             data[i] = data_ptr[i];
-        }
+        }*/
     } else {
         return;
     }
@@ -1400,7 +1401,7 @@ static redisContext *redisServer;
 /**
  * Write the Pulse Height data to disk
  */
-void writePHData(uint16_t moduleNum, uint8_t quaboNum, uint16_t PKTNUM, uint32_t UTC, uint32_t NANOSEC, long int tv_sec, long int tv_usec, char* data_ptr){
+void writePHData(uint16_t moduleNum, uint8_t quaboNum, uint16_t PKTNUM, uint32_t UTC, uint32_t NANOSEC, long int tv_sec, long int tv_usec, unsigned char* data_ptr){
     hid_t dataset;
     char name[100];
     uint8_t data[SCIDATASIZE*2];
@@ -1440,7 +1441,7 @@ void writePHData(uint16_t moduleNum, uint8_t quaboNum, uint16_t PKTNUM, uint32_t
 /**
  * Storing the module data to the modulePairData from the data pointer.
  */
-void storeData(modulePairData_t* module, char acqmode, uint16_t moduleNum, uint8_t quaboNum, uint16_t PKTNUM, uint32_t UTC, uint32_t NANOSEC, long int tv_sec, long int tv_usec, char* data_ptr){
+void storeData(modulePairData_t* module, char acqmode, uint16_t moduleNum, uint8_t quaboNum, uint16_t PKTNUM, uint32_t UTC, uint32_t NANOSEC, long int tv_sec, long int tv_usec, unsigned char* data_ptr){
     //uint16_t* moduleData;
     int mode;
     int quaboIndex;
@@ -1704,7 +1705,7 @@ static void *run(hashpipe_thread_args_t * args){
     uint64_t mcnt=0;
 
     //Output elements
-    char *block_ptr;
+    unsigned char *block_ptr;
     //char *textblock = (char *)malloc((BLOCKSIZE*sizeof(char)*3 + N_PKT_PER_BLOCK));
     int packetNum = 0;
     uint16_t moduleNum;

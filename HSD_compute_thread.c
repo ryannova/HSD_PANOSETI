@@ -38,6 +38,60 @@ quabo_info_t* quabo_info_t_new(){
     return value;
 }
 
+/**
+ * Data packet structure
+ */
+typedef struct dataPacket{
+    long int tv_sec;
+    long int tv_usec;
+    char acqmode;
+    uint16_t pktNum;
+    uint16_t modNum;
+    uint8_t quaNum;
+    uint32_t pktUTC;
+    uint32_t pktNSEC;
+    uint8_t data[PKTDATASIZE];
+    dataPacket* next_dataPacket;
+    uint64_t status[2];
+} dataPacket_t;
+
+/**
+ * Initializing a new data packet object
+ */
+dataPacket_t* dataPacket_t_new(){
+    dataPacket_t* value = (dataPacket_t*) malloc(sizeof(struct dataPacket));
+    memset(value->data, 0, sizeof(value->data));
+    value->next_dataPacket = NULL;
+    memset(value->status, 0, sizeof(uint64_t)* 2);
+    return value;
+}
+
+/**
+ * Find the highest pixel in the frame
+ */
+void findHighestPixel(dataPacket_t* dataPack){
+    
+}
+
+/**
+ * Creat a new data packet object from data in buffer
+ */
+dataPacket_t* get_dataPacket(HSD_input_block_t* datablockBuffer, int index){
+    dataPacket_t* new_dataPacket = dataPacket_t_new();
+    new_dataPacket->tv_sec = datablockBuffer->header.tv_sec[index];
+    new_dataPacket->tv_usec = datablockBuffer->header.tv_usec[index];
+    new_dataPacket->acqmode = datablockBuffer->header.acqmode[index];
+    new_dataPacket->pktNum = datablockBuffer->header.pktNum[index];
+    new_dataPacket-> modNum = datablockBuffer->header.pktNum[index];
+    new_dataPacket->quaNum = datablockBuffer->header.quaNum[index];
+    new_dataPacket->pktUTC = datablockBuffer->header.pktUTC[index];
+    new_dataPacket->pktNSEC = datablockBuffer->header.pktNSEC[index];
+    
+    memcpy(new_dataPacket->data, datablockBuffer->data_block+index*PKTDATASIZE, sizeof(unsigned char)*PKTDATASIZE);
+    //findHighestPixel(new_dataPacket);
+    return new_dataPacket;
+}
+
 static void *run(hashpipe_thread_args_t * args){
     // Local aliases to shorten access to args fields
     HSD_input_databuf_t *db_in = (HSD_input_databuf_t *)args->ibuf;
@@ -56,8 +110,12 @@ static void *run(hashpipe_thread_args_t * args){
     quabo_info_t* quaboListBegin = quabo_info_t_new();  //Initializing the quabo info linked list
     quabo_info_t* quaboListEnd = quaboListBegin;        //Setting the pointer to be the end of the linked list
     quabo_info_t* quaboInd[0xffff] = {NULL};            //Create a rudimentary hash map of the quabo number and linked list ind
-
     quabo_info_t* currentQuabo;                         //Pointer to the quabo info that is currently being used
+
+    dataPacket_t* dataPackListBegin = dataPacket_t_new();
+    dataPacket_t* dataPackListEnd = dataPackListBegin;
+    dataPacket_t* dataPackInd[0xffff] = {NULL};
+
     uint16_t boardLoc;                                  //The boardLoc(quabo index) for the current packet
     char* boardLocstr = (char *)malloc(sizeof(char)*10);
 
@@ -133,16 +191,23 @@ static void *run(hashpipe_thread_args_t * args){
         #endif
 
         for(int i = 0; i < db_in->block[curblock_in].header.data_block_size; i++){
-
-            //CALCULATION BLOCK
-            //TODO
-
-
-
             //Finding the packet number and computing the lost of packets by using packet number
             //Read the packet number from the packet
             mode = db_in->block[curblock_in].header.acqmode[i];
             boardLoc = db_in->block[curblock_in].header.modNum[i] * 4 + db_in->block[curblock_in].header.quaNum[i];
+
+            //CALCULATION BLOCK
+            //TODO
+            if (mode == 0x1){
+                if (dataPackInd[boardLoc] == NULL){
+                    dataPackInd[boardLoc] = get_dataPacket(&(db_in->block[curblock_in]), i);
+                } else {
+
+                }
+            }
+
+
+
             #ifdef TEST_MODE
                 //printf("Mode:%i ", mode);
                 //printf("BoardLocation:%02X \n", boardLoc);

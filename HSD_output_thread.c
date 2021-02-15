@@ -266,8 +266,8 @@ typedef struct modulePairData {
     long int tv_sec[PKTPERPAIR];
     long int tv_usec[PKTPERPAIR];
     uint32_t NANOSEC[PKTPERPAIR];
-    uint32_t upperNANOSEC;
-    uint32_t lowerNANOSEC;
+    uint32_t upperNANOSEC;                  //The largest value of the list of NANOSEC
+    uint32_t lowerNANOSEC;                  //The lowest value of the list of NANOSEC
     int bit16dataNum;
     int bit8dataNum;
     modulePairData* next_moduleID;
@@ -1692,13 +1692,21 @@ static void *run(hashpipe_thread_args_t * args){
     hashpipe_status_t st = args->st;
     const char * status_key = args->thread_desc->skey;
     
-    // Get info from status buffer if present
+    int maxSizeInput = 0;
     sprintf(saveLocation, "./");
+
+    // Get info from status buffer if present
+    hashpipe_status_lock_safe(&st);
     hgets(st.buf, "SAVELOC", STRBUFFSIZE, saveLocation);
+    hgeti4(st.buf, "MAXFILESIZE", &maxSizeInput);
+    hashpipe_status_unlock_safe(&st);
+    
     if (saveLocation[strlen(saveLocation)-1] != '/'){
         saveLocation[strlen(saveLocation)] = '/';
     }
     printf("Save Location: %s\n", saveLocation);
+
+    maxFileSize = maxSizeInput*8E5; 
     
     int rv;
     int block_idx = 0;
@@ -1715,10 +1723,7 @@ static void *run(hashpipe_thread_args_t * args){
     uint32_t packet_UTC;
     uint32_t packet_NANOSEC;
 
-    int maxSizeInput = 0;
-
-    hgeti4(st.buf, "MAXFILESIZE", &maxSizeInput);
-    maxFileSize = maxSizeInput*8E5; 
+    
 
     
     /*Initialization of Redis Server Values*/

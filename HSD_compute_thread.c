@@ -15,6 +15,11 @@
 #include "HSD_databuf.h"
 
 #define NUM_OF_MODES 7 // Number of mode and also used the create the size of array (Modes 1,2,3,6,7)
+#define TIME_COINC_RANGE 100 //The time coinc range for Pulse Height packets 
+#define TIME_COINC_OVERFLOW 1e9 - TIME_COINC_RANGE
+
+static int coincThreshold = 0;
+static int hardwareThreshold = 0;
 
 /**
  * Structure of the Quabo buffer stored for determining packet loss
@@ -52,7 +57,7 @@ typedef struct dataPacket{
     uint32_t pktNSEC;
     uint8_t data[PKTDATASIZE];
     dataPacket* next_dataPacket;
-    uint64_t status[2];
+    uint16_t status[16];
 } dataPacket_t;
 
 /**
@@ -62,7 +67,7 @@ dataPacket_t* dataPacket_t_new(){
     dataPacket_t* value = (dataPacket_t*) malloc(sizeof(struct dataPacket));
     memset(value->data, 0, sizeof(value->data));
     value->next_dataPacket = NULL;
-    memset(value->status, 0, sizeof(uint64_t)* 2);
+    memset(value->status, 0, sizeof(uint16_t)*16);
     return value;
 }
 
@@ -70,7 +75,23 @@ dataPacket_t* dataPacket_t_new(){
  * Find the highest pixel in the frame
  */
 void findHighestPixel(dataPacket_t* dataPack){
-    
+    for (int i = 0; i < PKTDATASIZE; i+=2){
+        if ((dataPack->data[i+1] << 8) | dataPack->data[i] >= coincThreshold){
+            dataPack->status[i/32] = dataPack->status[i/32] | (0x1 << ((i % 32)/2));
+        }
+    }
+}
+
+/**
+ *  Find the first row with spike
+ */ 
+uint16_t hasSpike(uint16_t* list){
+    for (int i = 0; i < 16; i++){
+        if (list[i]){
+            return list[i];
+        }
+    }
+    return 0;
 }
 
 /**
@@ -88,8 +109,107 @@ dataPacket_t* get_dataPacket(HSD_input_block_t* datablockBuffer, int index){
     new_dataPacket->pktNSEC = datablockBuffer->header.pktNSEC[index];
     
     memcpy(new_dataPacket->data, datablockBuffer->data_block+index*PKTDATASIZE, sizeof(unsigned char)*PKTDATASIZE);
-    //findHighestPixel(new_dataPacket);
+    findHighestPixel(new_dataPacket);
     return new_dataPacket;
+}
+
+/**
+ * Check to see if there is a coincidence between the data
+ */
+uint8_t checkCoinc(dataPacket_t* dataPackBuff, dataPacket_t* dataPackNew){
+
+}
+
+/**
+ * Get the time difference in NSEC from the dataPacket
+ */
+uint32_t timeDiff(dataPacket_t* dataPackBuff, dataPacket_t* dataPackNew){
+
+    if (dataPackNew->pktNSEC < dataPackBuff->pktNSEC){
+        if (dataPackNew->pktNSEC < TIME_COINC_RANGE && dataPackBuff->pktNSEC > TIME_COINC_OVERFLOW){
+            return dataPackNew->pktNSEC + 1e9 - dataPackBuff->pktNSEC;
+        }
+        return dataPackBuff->pktNSEC - dataPackNew->pktNSEC;
+    }
+    if (dataPackBuff->pktNSEC < TIME_COINC_RANGE && dataPackNew->pktNSEC > TIME_COINC_OVERFLOW){
+        return dataPackBuff->pktNSEC + 1e9 - dataPackNew->pktNSEC;
+    }
+    return dataPackNew->pktNSEC - dataPackBuff->pktNSEC;
+}
+
+/**
+ * Do coincidence between two data pack objects
+ */
+uint8_t doCoinc(dataPacket_t* dataPackBuff, dataPacket_t* dataPackNew, HSD_output_databuf_t* db_out){
+    while (timeDiff(dataPackBuff, dataPackNew) > 2*TIME_COINC_RANGE){
+        dataPackBuff = dataPackBuff->next_dataPacket;
+    }
+    dataPacket_t* listHead = dataPackBuff;
+    uint8_t returnVal = 0x0;
+    //while the next packet is not equal to null
+    //  Check to see if there is a coincidence and if so we can return
+    //  Insert new packet into the data packet buffer
+    //      We want to check to see that the current packet is later the current time and the next packet is eariler than the current time
+    //      If the next packet is null then just append to the end.
+    while(listHead->next_dataPacket != NULL){
+        if (checkCoinc(listHead, dataPackNew)){
+            returnVal = 0x1;
+        }
+        if (listHead->){
+
+        }
+        listHead = listHead->next_dataPacket;
+    }
+    if (checkCoinc(listHead, dataPackNew)){
+        returnVal = 0x1
+    }
+    return returnVal;
+}
+
+void copyPacketToStream(HSD_input_databuf_t* db_in, HSD_output_databuf_t* db_out, int curblock_in, int curblock_out, int mode, int i){
+    int streamBlockSize = db_out->block[curblock_out].header.stream_block_size;
+    if (mode < 4){
+        memcpy(db_out->block[curblock_out].stream_block+streamBlockSize*PKTDATASIZE, db_in->block[curblock_in].data_block+i*PKTDATASIZE, PKTDATASIZE*sizeof(unsigned char));
+    } else {
+        memcpy(db_out->block[curblock_out].stream_block+streamBlockSize*PKTDATASIZE, db_in->block[curblock_in].data_block+i*PKTDATASIZE, BIT8PKTDATASIZE*sizeof(unsigned char));
+    }
+
+    //Copy time over to output
+    db_out->block[curblock_out].header.acqmode[streamBlockSize] = db_in->block[curblock_in].header.acqmode[i];
+    db_out->block[curblock_out].header.pktNum[streamBlockSize] = db_in->block[curblock_in].header.pktNum[i];
+    db_out->block[curblock_out].header.modNum[streamBlockSize] = db_in->block[curblock_in].header.modNum[i];
+    db_out->block[curblock_out].header.quaNum[streamBlockSize] = db_in->block[curblock_in].header.quaNum[i];
+    db_out->block[curblock_out].header.pktUTC[streamBlockSize] = db_in->block[curblock_in].header.pktUTC[i];
+    db_out->block[curblock_out].header.pktNSEC[streamBlockSize] = db_in->block[curblock_in].header.pktNSEC[i];
+
+
+    db_out->block[curblock_out].header.tv_sec[streamBlockSize] = db_in->block[curblock_in].header.tv_sec[i];
+    db_out->block[curblock_out].header.tv_usec[streamBlockSize] = db_in->block[curblock_in].header.tv_usec[i];
+
+    db_out->block[curblock_out].header.stream_block_size++;
+}
+
+void copyPacketToCoinc(HSD_input_databuf_t* db_in, HSD_output_databuf_t* db_out, int curblock_in, int curblock_out, int mode, int i){
+    int coincBlockSize = db_out->block[curblock_out].header.coinc_block_size;
+    if (mode < 4){
+        memcpy(db_out->block[curblock_out].coinc_block+coincBlockSize*PKTDATASIZE, db_in->block[curblock_in].data_block+i*PKTDATASIZE, PKTDATASIZE*sizeof(unsigned char));
+    } else {
+        memcpy(db_out->block[curblock_out].coinc_block+coincBlockSize*PKTDATASIZE, db_in->block[curblock_in].data_block+i*PKTDATASIZE, BIT8PKTDATASIZE*sizeof(unsigned char));
+    }
+
+    //Copy time over to output
+    db_out->block[curblock_out].header.acqmode[coincBlockSize] = db_in->block[curblock_in].header.acqmode[i];
+    db_out->block[curblock_out].header.pktNum[coincBlockSize] = db_in->block[curblock_in].header.pktNum[i];
+    db_out->block[curblock_out].header.modNum[coincBlockSize] = db_in->block[curblock_in].header.modNum[i];
+    db_out->block[curblock_out].header.quaNum[coincBlockSize] = db_in->block[curblock_in].header.quaNum[i];
+    db_out->block[curblock_out].header.pktUTC[coincBlockSize] = db_in->block[curblock_in].header.pktUTC[i];
+    db_out->block[curblock_out].header.pktNSEC[coincBlockSize] = db_in->block[curblock_in].header.pktNSEC[i];
+
+
+    db_out->block[curblock_out].header.tv_sec[coincBlockSize] = db_in->block[curblock_in].header.tv_sec[i];
+    db_out->block[curblock_out].header.tv_usec[coincBlockSize] = db_in->block[curblock_in].header.tv_usec[i];
+
+    db_out->block[curblock_out].header.coinc_block_size++;
 }
 
 static void *run(hashpipe_thread_args_t * args){
@@ -115,10 +235,10 @@ static void *run(hashpipe_thread_args_t * args){
     dataPacket_t* dataPackListBegin = dataPacket_t_new();
     dataPacket_t* dataPackListEnd = dataPackListBegin;
     dataPacket_t* dataPackInd[0xffff] = {NULL};
+    dataPacket_t* newdataPack;
 
     uint16_t boardLoc;                                  //The boardLoc(quabo index) for the current packet
     char* boardLocstr = (char *)malloc(sizeof(char)*10);
-
 
     /*uint16_t pkt_num[NUM_OF_MODES+1];
     uint16_t prev_pkt_num[NUM_OF_MODES+1];
@@ -128,6 +248,12 @@ static void *run(hashpipe_thread_args_t * args){
     //Counters for the packets lost
     int total_lost_pkts = 0;
     int current_pkt_lost;
+
+    hashpipe_status_lock_safe(&st);
+	// Get the coincThreshold value
+    hgeti4(st.buf, "COINCTHRESHOLD", &coincThreshold);
+    hgeti4(st.buf, "HARDWARETHRESHOLD", &hardwareThreshold);
+	hashpipe_status_unlock_safe(&st);
 
     printf("-----------Finished Setup of Compute Thread----------\n\n");
 
@@ -199,11 +325,16 @@ static void *run(hashpipe_thread_args_t * args){
             //CALCULATION BLOCK
             //TODO
             if (mode == 0x1){
-                if (dataPackInd[boardLoc] == NULL){
-                    dataPackInd[boardLoc] = get_dataPacket(&(db_in->block[curblock_in]), i);
-                } else {
-
+                newdataPack = get_dataPacket(&(db_in->block[curblock_in]), i);
+                if (hasSpike(newdataPack->status)){
+                    copyPacketToStream(db_in, db_out, curblock_in, curblock_out, mode, i);
                 }
+                if (dataPackInd[boardLoc] == NULL){
+                    dataPackInd[boardLoc] = newdataPack;
+                } else {
+                    doCoinc(dataPackInd[boardLoc], newdataPack, db_out);
+                }
+                continue;
             }
 
 
@@ -248,26 +379,7 @@ static void *run(hashpipe_thread_args_t * args){
             }
             currentQuabo->prev_pkt_num[mode] = currentQuabo->pkt_num[mode]; //Update the previous packet number to be the current packet number
 
-
-            if (mode < 4){
-                memcpy(db_out->block[curblock_out].stream_block+i*PKTDATASIZE, db_in->block[curblock_in].data_block+i*PKTDATASIZE, PKTDATASIZE*sizeof(unsigned char));
-            } else {
-                memcpy(db_out->block[curblock_out].stream_block+i*PKTDATASIZE, db_in->block[curblock_in].data_block+i*PKTDATASIZE, BIT8PKTDATASIZE*sizeof(unsigned char));
-            }
-
-            //Copy time over to output
-            db_out->block[curblock_out].header.acqmode[i] = db_in->block[curblock_in].header.acqmode[i];
-            db_out->block[curblock_out].header.pktNum[i] = db_in->block[curblock_in].header.pktNum[i];
-            db_out->block[curblock_out].header.modNum[i] = db_in->block[curblock_in].header.modNum[i];
-            db_out->block[curblock_out].header.quaNum[i] = db_in->block[curblock_in].header.quaNum[i];
-            db_out->block[curblock_out].header.pktUTC[i] = db_in->block[curblock_in].header.pktUTC[i];
-            db_out->block[curblock_out].header.pktNSEC[i] = db_in->block[curblock_in].header.pktNSEC[i];
-
-
-            db_out->block[curblock_out].header.tv_sec[i] = db_in->block[curblock_in].header.tv_sec[i];
-            db_out->block[curblock_out].header.tv_usec[i] = db_in->block[curblock_in].header.tv_usec[i];
-
-            db_out->block[curblock_out].header.stream_block_size++;
+            copyPacketToStream(db_in, db_out, curblock_in, curblock_out, mode, i);
         
         }
 
